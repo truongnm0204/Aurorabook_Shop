@@ -141,6 +141,17 @@ public class VoucherManagementServlet extends HttpServlet {
             Voucher voucher = extractVoucherFromRequest(request);
             voucher.setUsageCount(0);
             
+            // Validate discount type before saving
+            String discountType = voucher.getDiscountType();
+            List<String> validTypes = voucherDAO.getAllDiscountTypes();
+            
+            if (!validTypes.contains(discountType)) {
+                request.setAttribute("error", "Invalid discount type: " + discountType + ". Valid types are: " + String.join(", ", validTypes));
+                request.setAttribute("voucher", voucher); // Giữ lại dữ liệu đã nhập
+                showCreateForm(request, response);
+                return;
+            }
+            
             boolean success = voucherDAO.createVoucher(voucher);
             if (success) {
                 response.sendRedirect(request.getContextPath() + "/admin/vouchers?success=voucher_created");
@@ -167,6 +178,22 @@ public class VoucherManagementServlet extends HttpServlet {
                     Voucher voucher = extractVoucherFromRequest(request);
                     voucher.setVoucherId(id);
                     voucher.setUsageCount(existingVoucher.get().getUsageCount());
+                    
+                    // Validate discount type before updating
+                    String discountType = voucher.getDiscountType();
+                    List<String> validTypes = voucherDAO.getAllDiscountTypes();
+                    
+                    if (!validTypes.contains(discountType)) {
+                        request.setAttribute("error", "Invalid discount type: " + discountType + ". Valid types are: " + String.join(", ", validTypes));
+                        request.setAttribute("voucher", voucher);
+                        // Thêm các thuộc tính cần thiết
+                        request.setAttribute("discountTypes", validTypes);
+                        request.setAttribute("statusCodes", voucherDAO.getAllVoucherStatuses());
+                        request.setAttribute("startAtFormatted", voucher.getStartAt().format(DATE_TIME_FORMATTER));
+                        request.setAttribute("endAtFormatted", voucher.getEndAt().format(DATE_TIME_FORMATTER));
+                        request.getRequestDispatcher("/WEB-INF/views/admin/voucher_create.jsp").forward(request, response);
+                        return;
+                    }
                     
                     boolean success = voucherDAO.updateVoucher(voucher);
                     if (success) {
@@ -227,24 +254,96 @@ public class VoucherManagementServlet extends HttpServlet {
         
         voucher.setCode(code);
         voucher.setDiscountType(discountType);
-        voucher.setValue(new BigDecimal(valueStr));
         
-        if (maxAmountStr != null && !maxAmountStr.isEmpty()) {
-            voucher.setMaxAmount(new BigDecimal(maxAmountStr));
+        // Kiểm tra và làm sạch giá trị trước khi chuyển đổi
+        if (valueStr != null && !valueStr.trim().isEmpty()) {
+            try {
+                // Thay thế dấu phẩy bằng dấu chấm nếu có
+                valueStr = valueStr.trim().replace(',', '.');
+                voucher.setValue(new BigDecimal(valueStr));
+            } catch (NumberFormatException e) {
+                throw new NumberFormatException("Giá trị giảm không hợp lệ: " + valueStr);
+            }
+        } else {
+            throw new NumberFormatException("Giá trị giảm không được để trống");
         }
         
-        voucher.setMinOrderAmount(new BigDecimal(minOrderAmountStr));
+        // Xử lý giá trị tối đa
+        if (maxAmountStr != null && !maxAmountStr.trim().isEmpty()) {
+            try {
+                maxAmountStr = maxAmountStr.trim().replace(',', '.');
+                voucher.setMaxAmount(new BigDecimal(maxAmountStr));
+            } catch (NumberFormatException e) {
+                throw new NumberFormatException("Giá trị giảm tối đa không hợp lệ: " + maxAmountStr);
+            }
+        }
+        
+        // Xử lý giá trị đơn hàng tối thiểu
+        if (minOrderAmountStr != null && !minOrderAmountStr.trim().isEmpty()) {
+            try {
+                minOrderAmountStr = minOrderAmountStr.trim().replace(',', '.');
+                voucher.setMinOrderAmount(new BigDecimal(minOrderAmountStr));
+            } catch (NumberFormatException e) {
+                throw new NumberFormatException("Giá trị đơn hàng tối thiểu không hợp lệ: " + minOrderAmountStr);
+            }
+        } else {
+            // Nếu không có giá trị, đặt là 0
+            voucher.setMinOrderAmount(BigDecimal.ZERO);
+        }
         
         // Parse dates
-        voucher.setStartAt(LocalDateTime.parse(startAtStr, DATE_TIME_FORMATTER));
-        voucher.setEndAt(LocalDateTime.parse(endAtStr, DATE_TIME_FORMATTER));
-        
-        if (usageLimitStr != null && !usageLimitStr.isEmpty()) {
-            voucher.setUsageLimit(Integer.parseInt(usageLimitStr));
+        try {
+            if (startAtStr != null && !startAtStr.trim().isEmpty()) {
+                voucher.setStartAt(LocalDateTime.parse(startAtStr.trim(), DATE_TIME_FORMATTER));
+            } else {
+                throw new IllegalArgumentException("Ngày bắt đầu không được để trống");
+            }
+            
+            if (endAtStr != null && !endAtStr.trim().isEmpty()) {
+                voucher.setEndAt(LocalDateTime.parse(endAtStr.trim(), DATE_TIME_FORMATTER));
+            } else {
+                throw new IllegalArgumentException("Ngày kết thúc không được để trống");
+            }
+            
+            // Kiểm tra ngày kết thúc phải sau ngày bắt đầu
+            if (voucher.getEndAt().isBefore(voucher.getStartAt())) {
+                throw new IllegalArgumentException("Ngày kết thúc phải sau ngày bắt đầu");
+            }
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException) {
+                throw e;
+            }
+            throw new IllegalArgumentException("Định dạng ngày giờ không hợp lệ: " + e.getMessage());
         }
         
-        if (perUserLimitStr != null && !perUserLimitStr.isEmpty()) {
-            voucher.setPerUserLimit(Integer.parseInt(perUserLimitStr));
+        // Xử lý giới hạn sử dụng
+        if (usageLimitStr != null && !usageLimitStr.trim().isEmpty()) {
+            try {
+                voucher.setUsageLimit(Integer.parseInt(usageLimitStr.trim()));
+                if (voucher.getUsageLimit() < 0) {
+                    throw new NumberFormatException("Giới hạn sử dụng không được âm");
+                }
+            } catch (NumberFormatException e) {
+                if (e.getMessage().contains("không được âm")) {
+                    throw e;
+                }
+                throw new NumberFormatException("Giới hạn sử dụng phải là số nguyên: " + usageLimitStr);
+            }
+        }
+        
+        // Xử lý giới hạn sử dụng mỗi người dùng
+        if (perUserLimitStr != null && !perUserLimitStr.trim().isEmpty()) {
+            try {
+                voucher.setPerUserLimit(Integer.parseInt(perUserLimitStr.trim()));
+                if (voucher.getPerUserLimit() < 0) {
+                    throw new NumberFormatException("Giới hạn mỗi người dùng không được âm");
+                }
+            } catch (NumberFormatException e) {
+                if (e.getMessage().contains("không được âm")) {
+                    throw e;
+                }
+                throw new NumberFormatException("Giới hạn mỗi người dùng phải là số nguyên: " + perUserLimitStr);
+            }
         }
         
         voucher.setStatus(status);

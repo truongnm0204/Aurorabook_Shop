@@ -5,7 +5,6 @@ import com.group01.aurora_demo.utils.DBConnectionUtil;
 
 import java.math.BigDecimal;
 import java.sql.*;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -231,6 +230,12 @@ public class VoucherDAO {
             }
         } catch (SQLException e) {
             e.printStackTrace();
+        }
+        
+        // Nếu không có dữ liệu từ database, trả về giá trị mặc định
+        if (types.isEmpty()) {
+            types.add("AMOUNT");
+            types.add("PERCENT");
         }
         
         return types;
