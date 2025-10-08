@@ -198,6 +198,7 @@ public class FlashSalesManagementServlet extends HttpServlet {
     private void handleRemoveProduct(HttpServletRequest req, HttpServletResponse resp) throws Exception {
         long flashSaleId = parseLong(req.getParameter("flashSaleId"), -1);
         long productId = parseLong(req.getParameter("productId"), -1);
+        long flashSaleItemId = parseLong(req.getParameter("flashSaleItemId"), -1);
         
         if (flashSaleId <= 0 || productId <= 0) {
             resp.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing flashSaleId or productId");
@@ -209,6 +210,18 @@ public class FlashSalesManagementServlet extends HttpServlet {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND, "Product not found in flash sale");
             return;
         }
+        
+        // Check if the item can be deleted (not in ACTIVE status and no related orders)
+        if (flashSaleItemId > 0) {
+            if (!dao.canDelete(flashSaleItemId)) {
+                req.getSession().setAttribute("errorMessage", "Không thể xóa sản phẩm này vì Flash Sale đã bắt đầu hoặc đã có đơn hàng!");
+                
+                // Redirect back to flash sale detail page
+                String redirectUrl = req.getContextPath() + "/admin/flash-sales/detail?id=" + flashSaleId;
+                redirectBackWithParams(req, resp, redirectUrl);
+                return;
+            }
+        }
 
         // Remove product from flash sale
         int result = dao.removeProductFromFlashSale(flashSaleId, productId);
@@ -219,27 +232,34 @@ public class FlashSalesManagementServlet extends HttpServlet {
             
             // Redirect back to flash sale detail page
             String redirectUrl = req.getContextPath() + "/admin/flash-sales/detail?id=" + flashSaleId;
-            // Preserve filter parameters
-            String name = param(req, "name");
-            String publisher = param(req, "publisher");
-            String price = param(req, "price");
-            String sort = param(req, "sort");
-            int page = parseInt(req.getParameter("page"), 1);
-            int pageSize = parseInt(req.getParameter("pageSize"), 12);
-            
-            if (!name.isEmpty() || !publisher.isEmpty() || !price.isEmpty() || !sort.isEmpty()) {
-                redirectUrl += "&name=" + java.net.URLEncoder.encode(name, "UTF-8");
-                redirectUrl += "&publisher=" + java.net.URLEncoder.encode(publisher, "UTF-8");
-                redirectUrl += "&price=" + java.net.URLEncoder.encode(price, "UTF-8");
-                redirectUrl += "&sort=" + java.net.URLEncoder.encode(sort, "UTF-8");
-                redirectUrl += "&page=" + page;
-                redirectUrl += "&pageSize=" + pageSize;
-            }
-            
-            resp.sendRedirect(redirectUrl);
+            redirectBackWithParams(req, resp, redirectUrl);
         } else {
             resp.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to remove product from flash sale");
         }
+    }
+    
+    /**
+     * Helper method to redirect back with all filter parameters
+     */
+    private void redirectBackWithParams(HttpServletRequest req, HttpServletResponse resp, String redirectUrl) 
+            throws IOException {
+        String name = param(req, "name");
+        String publisher = param(req, "publisher");
+        String price = param(req, "price");
+        String sort = param(req, "sort");
+        int page = parseInt(req.getParameter("page"), 1);
+        int pageSize = parseInt(req.getParameter("pageSize"), 12);
+        
+        if (!name.isEmpty() || !publisher.isEmpty() || !price.isEmpty() || !sort.isEmpty()) {
+            redirectUrl += "&name=" + java.net.URLEncoder.encode(name, "UTF-8");
+            redirectUrl += "&publisher=" + java.net.URLEncoder.encode(publisher, "UTF-8");
+            redirectUrl += "&price=" + java.net.URLEncoder.encode(price, "UTF-8");
+            redirectUrl += "&sort=" + java.net.URLEncoder.encode(sort, "UTF-8");
+            redirectUrl += "&page=" + page;
+            redirectUrl += "&pageSize=" + pageSize;
+        }
+        
+        resp.sendRedirect(redirectUrl);
     }
 
     private static String param(HttpServletRequest req, String name) {

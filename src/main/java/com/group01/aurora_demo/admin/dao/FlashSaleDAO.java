@@ -372,4 +372,56 @@ public int upsertFlashSaleItem(long flashSaleId, long productId, long shopId,
     }
 }
 
+    /**
+     * Kiểm tra xem sản phẩm có thể bị xoá khỏi Flash Sale hay không
+     * - Chỉ cho phép xoá khi đợt Flash Sale chưa bắt đầu (status != 'ACTIVE')
+     * - Và sản phẩm chưa có đơn hàng nào
+     */
+    public boolean canDelete(long flashSaleItemId) throws SQLException {
+        String sql = """
+            SELECT fs.Status, COUNT(oi.OrderItemID) AS UsedCount
+            FROM FlashSaleItems fsi
+            JOIN FlashSales fs ON fs.FlashSaleID = fsi.FlashSaleID
+            LEFT JOIN OrderItems oi ON oi.FlashSaleItemID = fsi.FlashSaleItemID
+            WHERE fsi.FlashSaleItemID = ?
+            GROUP BY fs.Status
+        """;
+        try (Connection cn = DataSourceProvider.get().getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setLong(1, flashSaleItemId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                String status = rs.getString("Status");
+                int usedCount = rs.getInt("UsedCount");
+                return !status.equalsIgnoreCase("ACTIVE") && usedCount == 0;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Xoá sản phẩm khỏi Flash Sale (xoá vật lý)
+     */
+    public int deleteFlashSaleItem(long flashSaleItemId) throws SQLException {
+        String sql = "DELETE FROM FlashSaleItems WHERE FlashSaleItemID = ?";
+        try (Connection cn = DataSourceProvider.get().getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setLong(1, flashSaleItemId);
+            return ps.executeUpdate();
+        }
+    }
+    
+    /**
+     * Xoá mềm sản phẩm khỏi Flash Sale (sử dụng IsDeleted)
+     * Lưu ý: Cần đảm bảo bảng FlashSaleItems đã có cột IsDeleted
+     * ALTER TABLE FlashSaleItems ADD IsDeleted BIT NOT NULL DEFAULT(0)
+     */
+    public int softDeleteFlashSaleItem(long flashSaleItemId) throws SQLException {
+        String sql = "UPDATE FlashSaleItems SET IsDeleted = 1 WHERE FlashSaleItemID = ?";
+        try (Connection cn = DataSourceProvider.get().getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setLong(1, flashSaleItemId);
+            return ps.executeUpdate();
+        }
+    }
 }
