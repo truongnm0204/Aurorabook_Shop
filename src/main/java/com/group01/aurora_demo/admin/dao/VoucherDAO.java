@@ -67,6 +67,30 @@ public class VoucherDAO {
         return Optional.empty();
     }
     
+    /**
+     * Check if a voucher code already exists
+     * @param code The voucher code to check
+     * @return true if the code exists, false otherwise
+     */
+    public boolean isVoucherCodeExists(String code) {
+        String query = "SELECT COUNT(*) AS Count FROM Vouchers WHERE Code = ?";
+        
+        try (Connection conn = DBConnectionUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            
+            ps.setString(1, code);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("Count") > 0;
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        
+        return false;
+    }
+    
     public List<Voucher> getVouchersByStatus(String status) {
         List<Voucher> vouchers = new ArrayList<>();
         String query = "SELECT * FROM Vouchers WHERE Status = ? ORDER BY VoucherID DESC";

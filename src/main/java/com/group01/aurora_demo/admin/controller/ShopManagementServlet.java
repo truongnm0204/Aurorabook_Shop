@@ -138,10 +138,60 @@ public class ShopManagementServlet extends HttpServlet {
             return;
         }
 
+        // Get parameters
         String name = param(req, "name");
         String description = param(req, "description");
         String status = param(req, "status");
         String invoiceEmail = param(req, "invoiceEmail");
+        
+        // Validate required fields
+        StringBuilder errors = new StringBuilder();
+        if (name.isEmpty()) {
+            errors.append("Shop name is required. ");
+        }
+        if (status.isEmpty()) {
+            errors.append("Status is required. ");
+        }
+        
+        // Validate email format if provided
+        if (!invoiceEmail.isEmpty() && !isValidEmail(invoiceEmail)) {
+            errors.append("Invalid email format. ");
+        }
+        
+        // If there are errors, show form with error messages
+        if (errors.length() > 0) {
+            req.setAttribute("error", errors.toString());
+            
+            // Keep entered values
+            Shop shop = new Shop();
+            shop.setId(id);
+            shop.setName(name);
+            shop.setDescription(description);
+            shop.setStatus(status);
+            shop.setInvoiceEmail(invoiceEmail);
+            
+            try {
+                // Get original data for fields not in form
+                Shop originalShop = dao.findById(id);
+                if (originalShop != null) {
+                    shop.setAvatarUrl(originalShop.getAvatarUrl());
+                    shop.setCreatedAt(originalShop.getCreatedAt());
+                    shop.setUpdatedAt(originalShop.getUpdatedAt());
+                }
+                
+                ShopDAO.PickupAddress pickupAddress = dao.getPickupAddress(id);
+                List<String> statuses = dao.loadStatuses();
+                
+                req.setAttribute("shop", shop);
+                req.setAttribute("pickup", pickupAddress);
+                req.setAttribute("shopStatuses", statuses);
+            } catch (SQLException e) {
+                throw new ServletException(e);
+            }
+            
+            req.getRequestDispatcher("/WEB-INF/views/admin/shopInfo.jsp").forward(req, resp);
+            return;
+        }
 
         // Update basic information
         dao.update(id, name, description, status, invoiceEmail);
@@ -149,13 +199,48 @@ public class ShopManagementServlet extends HttpServlet {
         // Handle avatar upload if present
         Part avatarPart = req.getPart("avatar");
         if (avatarPart != null && avatarPart.getSize() > 0) {
-            String avatarUrl = saveUploadedFile(avatarPart, req);
-            if (avatarUrl != null) {
-                dao.updateAvatar(id, avatarUrl);
+            // Validate file type and size
+            String fileName = getSubmittedFileName(avatarPart);
+            if (fileName != null && !fileName.isEmpty()) {
+                if (!isValidImageFile(fileName)) {
+                    req.setAttribute("error", "Invalid image file type. Please use PNG, JPG, JPEG, or WEBP.");
+                    showDetail(req, resp);
+                    return;
+                }
+                
+                if (avatarPart.getSize() > 1024 * 1024 * 5) { // 5MB limit
+                    req.setAttribute("error", "Image file is too large. Maximum size is 5MB.");
+                    showDetail(req, resp);
+                    return;
+                }
+                
+                String avatarUrl = saveUploadedFile(avatarPart, req);
+                if (avatarUrl != null) {
+                    dao.updateAvatar(id, avatarUrl);
+                }
             }
         }
 
         resp.sendRedirect(req.getContextPath() + "/admin/shops/detail?id=" + id);
+    }
+    
+    /**
+     * Validate email format
+     */
+    private boolean isValidEmail(String email) {
+        String emailRegex = "^[A-Za-z0-9+_.-]+@(.+)$";
+        return email.matches(emailRegex);
+    }
+    
+    /**
+     * Validate image file type
+     */
+    private boolean isValidImageFile(String fileName) {
+        fileName = fileName.toLowerCase();
+        return fileName.endsWith(".png") || 
+               fileName.endsWith(".jpg") || 
+               fileName.endsWith(".jpeg") || 
+               fileName.endsWith(".webp");
     }
 
     /**

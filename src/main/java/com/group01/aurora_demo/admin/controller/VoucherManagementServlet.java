@@ -138,6 +138,23 @@ public class VoucherManagementServlet extends HttpServlet {
     
     private void createVoucher(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
         try {
+            // Basic field validation before extracting full object
+            String code = param(request, "code");
+            if (code.isEmpty()) {
+                request.setAttribute("error", "Voucher code is required");
+                showCreateForm(request, response);
+                return;
+            }
+            
+            // Check if voucher code already exists
+            if (voucherDAO.isVoucherCodeExists(code)) {
+                request.setAttribute("error", "Voucher code already exists. Please use a different code.");
+                // Preserve form data
+                preserveFormData(request);
+                showCreateForm(request, response);
+                return;
+            }
+            
             Voucher voucher = extractVoucherFromRequest(request);
             voucher.setUsageCount(0);
             
@@ -147,7 +164,44 @@ public class VoucherManagementServlet extends HttpServlet {
             
             if (!validTypes.contains(discountType)) {
                 request.setAttribute("error", "Invalid discount type: " + discountType + ". Valid types are: " + String.join(", ", validTypes));
-                request.setAttribute("voucher", voucher); // Giữ lại dữ liệu đã nhập
+                request.setAttribute("voucher", voucher);
+                showCreateForm(request, response);
+                return;
+            }
+            
+            // Additional business rule validations
+            StringBuilder errors = new StringBuilder();
+            
+            // Validate value based on discount type
+            if ("PERCENTAGE".equals(discountType) && voucher.getValue().compareTo(new BigDecimal("100")) > 0) {
+                errors.append("Percentage discount cannot exceed 100%. ");
+            }
+            
+            // Validate minimum order amount vs max discount
+            if (voucher.getMaxAmount() != null && voucher.getMinOrderAmount() != null) {
+                if (voucher.getMaxAmount().compareTo(voucher.getMinOrderAmount()) > 0) {
+                    errors.append("Maximum discount amount cannot be greater than minimum order amount. ");
+                }
+            }
+            
+            // Usage limits validation
+            if (voucher.getUsageLimit() != null && voucher.getUsageLimit() <= 0) {
+                errors.append("Usage limit must be greater than zero. ");
+            }
+            
+            if (voucher.getPerUserLimit() != null && voucher.getPerUserLimit() <= 0) {
+                errors.append("Per-user limit must be greater than zero. ");
+            }
+            
+            // Date validation (additional check beyond what's in extractVoucherFromRequest)
+            if (voucher.getStartAt().isBefore(LocalDateTime.now())) {
+                errors.append("Start date cannot be in the past. ");
+            }
+            
+            // If there are validation errors, show form with error messages
+            if (errors.length() > 0) {
+                request.setAttribute("error", errors.toString());
+                request.setAttribute("voucher", voucher);
                 showCreateForm(request, response);
                 return;
             }
@@ -157,62 +211,168 @@ public class VoucherManagementServlet extends HttpServlet {
                 response.sendRedirect(request.getContextPath() + "/admin/vouchers?success=voucher_created");
             } else {
                 request.setAttribute("error", "Failed to create voucher");
+                request.setAttribute("voucher", voucher);
                 showCreateForm(request, response);
             }
         } catch (Exception e) {
             e.printStackTrace();
             request.setAttribute("error", "Error processing voucher data: " + e.getMessage());
+            preserveFormData(request);
             showCreateForm(request, response);
         }
+    }
+    
+    /**
+     * Helper method to preserve form data when validation fails
+     */
+    private void preserveFormData(HttpServletRequest request) {
+        request.setAttribute("code", param(request, "code"));
+        request.setAttribute("discountType", param(request, "discountType"));
+        request.setAttribute("value", param(request, "value"));
+        request.setAttribute("maxAmount", param(request, "maxAmount"));
+        request.setAttribute("minOrderAmount", param(request, "minOrderAmount"));
+        request.setAttribute("startAt", param(request, "startAt"));
+        request.setAttribute("endAt", param(request, "endAt"));
+        request.setAttribute("usageLimit", param(request, "usageLimit"));
+        request.setAttribute("perUserLimit", param(request, "perUserLimit"));
+        request.setAttribute("status", param(request, "status"));
+        request.setAttribute("description", param(request, "description"));
+    }
+    
+    /**
+     * Helper method similar to the one in other servlets
+     */
+    private static String param(HttpServletRequest req, String name) {
+        String v = req.getParameter(name);
+        return v == null ? "" : v.trim();
     }
     
     private void updateVoucher(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
         String voucherId = request.getParameter("id");
         
-        if (voucherId != null && !voucherId.isEmpty()) {
-            try {
-                long id = Long.parseLong(voucherId);
-                Optional<Voucher> existingVoucher = voucherDAO.getVoucherById(id);
-                
-                if (existingVoucher.isPresent()) {
-                    Voucher voucher = extractVoucherFromRequest(request);
-                    voucher.setVoucherId(id);
-                    voucher.setUsageCount(existingVoucher.get().getUsageCount());
-                    
-                    // Validate discount type before updating
-                    String discountType = voucher.getDiscountType();
-                    List<String> validTypes = voucherDAO.getAllDiscountTypes();
-                    
-                    if (!validTypes.contains(discountType)) {
-                        request.setAttribute("error", "Invalid discount type: " + discountType + ". Valid types are: " + String.join(", ", validTypes));
-                        request.setAttribute("voucher", voucher);
-                        // Thêm các thuộc tính cần thiết
-                        request.setAttribute("discountTypes", validTypes);
-                        request.setAttribute("statusCodes", voucherDAO.getAllVoucherStatuses());
-                        request.setAttribute("startAtFormatted", voucher.getStartAt().format(DATE_TIME_FORMATTER));
-                        request.setAttribute("endAtFormatted", voucher.getEndAt().format(DATE_TIME_FORMATTER));
-                        request.getRequestDispatcher("/WEB-INF/views/admin/voucher_create.jsp").forward(request, response);
-                        return;
-                    }
-                    
-                    boolean success = voucherDAO.updateVoucher(voucher);
-                    if (success) {
-                        response.sendRedirect(request.getContextPath() + "/admin/vouchers/view?id=" + id + "&success=voucher_updated");
-                    } else {
-                        request.setAttribute("error", "Failed to update voucher");
-                        request.setAttribute("voucher", voucher);
-                        request.getRequestDispatcher("/WEB-INF/views/admin/voucher_create.jsp").forward(request, response);
-                    }
-                } else {
-                    response.sendRedirect(request.getContextPath() + "/admin/vouchers?error=voucher_not_found");
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-                response.sendRedirect(request.getContextPath() + "/admin/vouchers/edit?id=" + voucherId + "&error=" + e.getMessage());
-            }
-        } else {
+        if (voucherId == null || voucherId.isEmpty()) {
             response.sendRedirect(request.getContextPath() + "/admin/vouchers?error=invalid_voucher_id");
+            return;
         }
+        
+        try {
+            long id = Long.parseLong(voucherId);
+            Optional<Voucher> existingVoucherOpt = voucherDAO.getVoucherById(id);
+            
+            if (!existingVoucherOpt.isPresent()) {
+                response.sendRedirect(request.getContextPath() + "/admin/vouchers?error=voucher_not_found");
+                return;
+            }
+            
+            Voucher existingVoucher = existingVoucherOpt.get();
+            
+            // Basic field validation before extracting full object
+            String code = param(request, "code");
+            if (code.isEmpty()) {
+                request.setAttribute("error", "Voucher code is required");
+                showEditForm(request, response);
+                return;
+            }
+            
+            // Check if voucher code already exists and is different from current voucher
+            if (!code.equals(existingVoucher.getCode()) && voucherDAO.isVoucherCodeExists(code)) {
+                request.setAttribute("error", "Voucher code already exists. Please use a different code.");
+                showEditForm(request, response);
+                return;
+            }
+            
+            // Extract and validate voucher data
+            Voucher voucher;
+            try {
+                voucher = extractVoucherFromRequest(request);
+                voucher.setVoucherId(id);
+                voucher.setUsageCount(existingVoucher.getUsageCount());
+            } catch (Exception e) {
+                request.setAttribute("error", "Invalid voucher data: " + e.getMessage());
+                showEditForm(request, response);
+                return;
+            }
+            
+            // Validate discount type
+            String discountType = voucher.getDiscountType();
+            List<String> validTypes = voucherDAO.getAllDiscountTypes();
+            
+            if (!validTypes.contains(discountType)) {
+                request.setAttribute("error", "Invalid discount type: " + discountType + ". Valid types are: " + String.join(", ", validTypes));
+                setEditFormAttributes(request, voucher, validTypes);
+                request.getRequestDispatcher("/WEB-INF/views/admin/voucher_create.jsp").forward(request, response);
+                return;
+            }
+            
+            // Additional business rule validations
+            StringBuilder errors = new StringBuilder();
+            
+            // Validate value based on discount type
+            if ("PERCENTAGE".equals(discountType) && voucher.getValue().compareTo(new BigDecimal("100")) > 0) {
+                errors.append("Percentage discount cannot exceed 100%. ");
+            }
+            
+            // Validate minimum order amount vs max discount
+            if (voucher.getMaxAmount() != null && voucher.getMinOrderAmount() != null) {
+                if (voucher.getMaxAmount().compareTo(voucher.getMinOrderAmount()) > 0) {
+                    errors.append("Maximum discount amount cannot be greater than minimum order amount. ");
+                }
+            }
+            
+            // Usage limits validation
+            if (voucher.getUsageLimit() != null && voucher.getUsageLimit() <= 0) {
+                errors.append("Usage limit must be greater than zero. ");
+            }
+            
+            if (voucher.getPerUserLimit() != null && voucher.getPerUserLimit() <= 0) {
+                errors.append("Per-user limit must be greater than zero. ");
+            }
+            
+            // If there are validation errors, show form with error messages
+            if (errors.length() > 0) {
+                request.setAttribute("error", errors.toString());
+                setEditFormAttributes(request, voucher, validTypes);
+                request.getRequestDispatcher("/WEB-INF/views/admin/voucher_create.jsp").forward(request, response);
+                return;
+            }
+            
+            // Check if voucher is currently in use and dates are being changed
+            if (existingVoucher.getUsageCount() > 0) {
+                if (!existingVoucher.getStartAt().equals(voucher.getStartAt()) ||
+                    !existingVoucher.getEndAt().equals(voucher.getEndAt())) {
+                    errors.append("Cannot change dates for vouchers that are already in use. ");
+                    request.setAttribute("error", errors.toString());
+                    setEditFormAttributes(request, voucher, validTypes);
+                    request.getRequestDispatcher("/WEB-INF/views/admin/voucher_create.jsp").forward(request, response);
+                    return;
+                }
+            }
+            
+            boolean success = voucherDAO.updateVoucher(voucher);
+            if (success) {
+                response.sendRedirect(request.getContextPath() + "/admin/vouchers/view?id=" + id + "&success=voucher_updated");
+            } else {
+                request.setAttribute("error", "Failed to update voucher");
+                setEditFormAttributes(request, voucher, validTypes);
+                request.getRequestDispatcher("/WEB-INF/views/admin/voucher_create.jsp").forward(request, response);
+            }
+        } catch (NumberFormatException e) {
+            response.sendRedirect(request.getContextPath() + "/admin/vouchers?error=invalid_voucher_id_format");
+        } catch (Exception e) {
+            e.printStackTrace();
+            response.sendRedirect(request.getContextPath() + "/admin/vouchers/edit?id=" + voucherId + "&error=" + e.getMessage());
+        }
+    }
+    
+    /**
+     * Helper method to set attributes for edit form
+     */
+    private void setEditFormAttributes(HttpServletRequest request, Voucher voucher, List<String> discountTypes) throws ServletException, IOException {
+        request.setAttribute("voucher", voucher);
+        request.setAttribute("discountTypes", discountTypes);
+        request.setAttribute("statusCodes", voucherDAO.getAllVoucherStatuses());
+        request.setAttribute("startAtFormatted", voucher.getStartAt().format(DATE_TIME_FORMATTER));
+        request.setAttribute("endAtFormatted", voucher.getEndAt().format(DATE_TIME_FORMATTER));
     }
     
     private void deleteVoucher(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {

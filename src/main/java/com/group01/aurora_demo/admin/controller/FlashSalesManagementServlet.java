@@ -177,20 +177,152 @@ public class FlashSalesManagementServlet extends HttpServlet {
     }
 
     private void handleCreate(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+        // Get parameters
         String name = param(req, "name");
         String status = param(req, "status");
-        java.sql.Timestamp startAt = parseTimestamp(param(req, "startAt"));
-        java.sql.Timestamp endAt = parseTimestamp(param(req, "endAt"));
+        String startAtParam = param(req, "startAt");
+        String endAtParam = param(req, "endAt");
+        
+        // Validate required fields
+        StringBuilder errors = new StringBuilder();
+        if (name.isEmpty()) {
+            errors.append("Name is required. ");
+        }
+        if (status.isEmpty()) {
+            errors.append("Status is required. ");
+        }
+        if (startAtParam.isEmpty()) {
+            errors.append("Start date is required. ");
+        }
+        if (endAtParam.isEmpty()) {
+            errors.append("End date is required. ");
+        }
+        
+        // Parse timestamps if provided
+        java.sql.Timestamp startAt = null;
+        java.sql.Timestamp endAt = null;
+        
+        if (!startAtParam.isEmpty()) {
+            try {
+                startAt = parseTimestamp(startAtParam);
+            } catch (Exception e) {
+                errors.append("Invalid start date format. ");
+            }
+        }
+        
+        if (!endAtParam.isEmpty()) {
+            try {
+                endAt = parseTimestamp(endAtParam);
+            } catch (Exception e) {
+                errors.append("Invalid end date format. ");
+            }
+        }
+        
+        // Validate business rules
+        if (startAt != null && endAt != null && endAt.before(startAt)) {
+            errors.append("End date must be after start date. ");
+        }
+        
+        // If there are errors, show form with error messages
+        if (errors.length() > 0) {
+            req.setAttribute("error", errors.toString());
+            req.setAttribute("name", name);
+            req.setAttribute("status", status);
+            req.setAttribute("startAt", startAtParam);
+            req.setAttribute("endAt", endAtParam);
+            
+            try {
+                req.setAttribute("statuses", dao.loadStatuses());
+            } catch (SQLException e) {
+                throw new ServletException(e);
+            }
+            
+            req.getRequestDispatcher("/WEB-INF/views/admin/flash_sale_form.jsp").forward(req, resp);
+            return;
+        }
+        
+        // All validations passed, proceed with creation
         long id = dao.insert(name, startAt, endAt, status);
         resp.sendRedirect(req.getContextPath() + "/admin/flash-sales/detail?id=" + id);
     }
 
     private void handleUpdate(HttpServletRequest req, HttpServletResponse resp) throws Exception {
         long id = parseLong(req.getParameter("id"), -1);
+        
+        // Validate ID
+        if (id <= 0) {
+            resp.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid flash sale ID");
+            return;
+        }
+        
+        // Get parameters
         String name = param(req, "name");
         String status = param(req, "status");
-        java.sql.Timestamp startAt = parseTimestamp(param(req, "startAt"));
-        java.sql.Timestamp endAt = parseTimestamp(param(req, "endAt"));
+        String startAtParam = param(req, "startAt");
+        String endAtParam = param(req, "endAt");
+        
+        // Validate required fields
+        StringBuilder errors = new StringBuilder();
+        if (name.isEmpty()) {
+            errors.append("Name is required. ");
+        }
+        if (status.isEmpty()) {
+            errors.append("Status is required. ");
+        }
+        if (startAtParam.isEmpty()) {
+            errors.append("Start date is required. ");
+        }
+        if (endAtParam.isEmpty()) {
+            errors.append("End date is required. ");
+        }
+        
+        // Parse timestamps if provided
+        java.sql.Timestamp startAt = null;
+        java.sql.Timestamp endAt = null;
+        
+        if (!startAtParam.isEmpty()) {
+            try {
+                startAt = parseTimestamp(startAtParam);
+            } catch (Exception e) {
+                errors.append("Invalid start date format. ");
+            }
+        }
+        
+        if (!endAtParam.isEmpty()) {
+            try {
+                endAt = parseTimestamp(endAtParam);
+            } catch (Exception e) {
+                errors.append("Invalid end date format. ");
+            }
+        }
+        
+        // Validate business rules
+        if (startAt != null && endAt != null && endAt.before(startAt)) {
+            errors.append("End date must be after start date. ");
+        }
+        
+        // If there are errors, show form with error messages
+        if (errors.length() > 0) {
+            req.setAttribute("error", errors.toString());
+            req.setAttribute("name", name);
+            req.setAttribute("status", status);
+            req.setAttribute("startAt", startAtParam);
+            req.setAttribute("endAt", endAtParam);
+            req.setAttribute("id", id);
+            
+            try {
+                com.group01.aurora_demo.admin.model.FlashSale fs = dao.findById(id);
+                req.setAttribute("fs", fs);
+                req.setAttribute("statuses", dao.loadStatuses());
+            } catch (SQLException e) {
+                throw new ServletException(e);
+            }
+            
+            req.getRequestDispatcher("/WEB-INF/views/admin/flash_sale_form.jsp").forward(req, resp);
+            return;
+        }
+        
+        // All validations passed, proceed with update
         dao.update(id, name, startAt, endAt, status);
         resp.sendRedirect(req.getContextPath() + "/admin/flash-sales/detail?id=" + id);
     }
