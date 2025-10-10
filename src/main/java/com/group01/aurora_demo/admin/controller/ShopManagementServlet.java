@@ -164,7 +164,7 @@ public class ShopManagementServlet extends HttpServlet {
             
             // Keep entered values
             Shop shop = new Shop();
-            shop.setId(id);
+            shop.setShopId(id);
             shop.setName(name);
             shop.setDescription(description);
             shop.setStatus(status);
@@ -176,7 +176,6 @@ public class ShopManagementServlet extends HttpServlet {
                 if (originalShop != null) {
                     shop.setAvatarUrl(originalShop.getAvatarUrl());
                     shop.setCreatedAt(originalShop.getCreatedAt());
-                    shop.setUpdatedAt(originalShop.getUpdatedAt());
                 }
                 
                 ShopDAO.PickupAddress pickupAddress = dao.getPickupAddress(id);
