@@ -212,11 +212,15 @@ public class FlashSaleDAO {
         String where = " WHERE 1=1" +
                 (status != null && !status.isEmpty() ? " AND fsi.ApprovalStatus = ?" : "");
 
-        String base = " FROM FlashSaleItems fsi " +
+        // Use a subquery with ROW_NUMBER to get only one entry per product (the most recent one)
+        String base = " FROM (SELECT ROW_NUMBER() OVER (PARTITION BY fsi.ProductID ORDER BY fsi.CreatedAt DESC) as RowNum, " +
+                "fsi.FlashSaleItemID, fsi.ProductID, fsi.ShopID, fsi.FlashPrice, fsi.FsStock, fsi.ApprovalStatus, fsi.CreatedAt, " +
+                "fsi.FlashSaleID FROM FlashSaleItems fsi) as fsi " +
                 "JOIN Products p ON p.ProductID = fsi.ProductID " +
                 "LEFT JOIN Publishers pub ON pub.PublisherID = p.PublisherID " +
                 "LEFT JOIN Shops s ON s.ShopID = fsi.ShopID " +
-                "LEFT JOIN FlashSales fs ON fs.FlashSaleID = fsi.FlashSaleID " + where;
+                "LEFT JOIN FlashSales fs ON fs.FlashSaleID = fsi.FlashSaleID " + 
+                where + " AND fsi.RowNum = 1";  // Only select the most recent entry for each product
 
         String countSql = "SELECT COUNT(*)" + base;
         String dataSql = "SELECT fsi.FlashSaleItemID, p.ProductID, p.Title, pub.Name AS PublisherName, s.Name AS ShopName, " +
@@ -259,11 +263,164 @@ public class FlashSaleDAO {
     }
 
     public int updateApprovalStatus(long flashSaleItemId, String approvalStatus) throws SQLException {
+        // When approving, first check if any other items exist for the same product
+        if ("APPROVED".equals(approvalStatus)) {
+            // Get the product ID for this flash sale item
+            long productId = getProductIdForFlashSaleItem(flashSaleItemId);
+            if (productId > 0) {
+                // Mark any other items for this product as REJECTED to prevent duplicates
+                String rejectOthersSql = "UPDATE FlashSaleItems SET ApprovalStatus = 'REJECTED' WHERE ProductID = ? AND FlashSaleItemID != ?";
+                try (Connection cn = DataSourceProvider.get().getConnection();
+                     PreparedStatement ps = cn.prepareStatement(rejectOthersSql)) {
+                    ps.setLong(1, productId);
+                    ps.setLong(2, flashSaleItemId);
+                    ps.executeUpdate();
+                }
+            }
+        }
+        
+        // Now update the requested item
         String sql = "UPDATE FlashSaleItems SET ApprovalStatus = ? WHERE FlashSaleItemID = ?";
         try (Connection cn = DataSourceProvider.get().getConnection();
              PreparedStatement ps = cn.prepareStatement(sql)) {
             ps.setString(1, approvalStatus);
             ps.setLong(2, flashSaleItemId);
+            return ps.executeUpdate();
+        }
+    }
+    
+    /**
+     * Get the product ID for a given flash sale item
+     */
+    private long getProductIdForFlashSaleItem(long flashSaleItemId) throws SQLException {
+        String sql = "SELECT ProductID FROM FlashSaleItems WHERE FlashSaleItemID = ?";
+        try (Connection cn = DataSourceProvider.get().getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setLong(1, flashSaleItemId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                return rs.getLong(1);
+            }
+            return 0;
+        }
+    }
+    
+    /**
+     * Check if a product associated with this flash sale item is already approved in any flash sale
+     */
+    public boolean checkIfProductAlreadyApproved(long flashSaleItemId) throws SQLException {
+        String sql = """
+            SELECT COUNT(*) FROM FlashSaleItems fsi1
+            JOIN FlashSaleItems fsi2 ON fsi1.ProductID = fsi2.ProductID
+            WHERE fsi1.FlashSaleItemID = ?
+            AND fsi2.FlashSaleItemID != ?
+            AND fsi2.ApprovalStatus = 'APPROVED'
+        """;
+        
+        try (Connection cn = DataSourceProvider.get().getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setLong(1, flashSaleItemId);
+            ps.setLong(2, flashSaleItemId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+            return false;
+        }
+    }
+
+public int upsertFlashSaleItem(long flashSaleId, long productId, long shopId,
+                               double flashPrice, int fsStock, int perUserLimit) throws SQLException {
+    // First check if this product is already in any flash sale with PENDING or APPROVED status
+    String checkSql = """
+        SELECT COUNT(*) FROM FlashSaleItems 
+        WHERE ProductID = ? AND ApprovalStatus IN ('PENDING', 'APPROVED')
+    """;
+    
+    try (Connection cn = DataSourceProvider.get().getConnection()) {
+        // Check if product already exists in a flash sale
+        try (PreparedStatement checkPs = cn.prepareStatement(checkSql)) {
+            checkPs.setLong(1, productId);
+            ResultSet rs = checkPs.executeQuery();
+            if (rs.next() && rs.getInt(1) > 0) {
+                // Product already exists in a flash sale
+                // Delete existing entries for this product (to avoid duplicates)
+                String deleteSql = "DELETE FROM FlashSaleItems WHERE ProductID = ?";
+                try (PreparedStatement deletePs = cn.prepareStatement(deleteSql)) {
+                    deletePs.setLong(1, productId);
+                    deletePs.executeUpdate();
+                }
+            }
+        }
+        
+        // Now insert the new item
+        String sql = """
+            INSERT INTO FlashSaleItems 
+            (FlashSaleID, ProductID, ShopID, FlashPrice, FsStock, PerUserLimit, ApprovalStatus, CreatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, 'PENDING', SYSDATETIME());
+        """;
+        
+        try (PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setLong(1, flashSaleId);
+            ps.setLong(2, productId);
+            ps.setLong(3, shopId);
+            ps.setDouble(4, flashPrice);
+            ps.setInt(5, fsStock);
+            ps.setInt(6, perUserLimit);
+            return ps.executeUpdate();
+        }
+    }
+}
+
+    /**
+     * Kiểm tra xem sản phẩm có thể bị xoá khỏi Flash Sale hay không
+     * - Chỉ cho phép xoá khi đợt Flash Sale chưa bắt đầu (status != 'ACTIVE')
+     * - Và sản phẩm chưa có đơn hàng nào
+     */
+    public boolean canDelete(long flashSaleItemId) throws SQLException {
+        String sql = """
+            SELECT fs.Status, COUNT(oi.OrderItemID) AS UsedCount
+            FROM FlashSaleItems fsi
+            JOIN FlashSales fs ON fs.FlashSaleID = fsi.FlashSaleID
+            LEFT JOIN OrderItems oi ON oi.FlashSaleItemID = fsi.FlashSaleItemID
+            WHERE fsi.FlashSaleItemID = ?
+            GROUP BY fs.Status
+        """;
+        try (Connection cn = DataSourceProvider.get().getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setLong(1, flashSaleItemId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                String status = rs.getString("Status");
+                int usedCount = rs.getInt("UsedCount");
+                return !status.equalsIgnoreCase("ACTIVE") && usedCount == 0;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Xoá sản phẩm khỏi Flash Sale (xoá vật lý)
+     */
+    public int deleteFlashSaleItem(long flashSaleItemId) throws SQLException {
+        String sql = "DELETE FROM FlashSaleItems WHERE FlashSaleItemID = ?";
+        try (Connection cn = DataSourceProvider.get().getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setLong(1, flashSaleItemId);
+            return ps.executeUpdate();
+        }
+    }
+    
+    /**
+     * Xoá mềm sản phẩm khỏi Flash Sale (sử dụng IsDeleted)
+     * Lưu ý: Cần đảm bảo bảng FlashSaleItems đã có cột IsDeleted
+     * ALTER TABLE FlashSaleItems ADD IsDeleted BIT NOT NULL DEFAULT(0)
+     */
+    public int softDeleteFlashSaleItem(long flashSaleItemId) throws SQLException {
+        String sql = "UPDATE FlashSaleItems SET IsDeleted = 1 WHERE FlashSaleItemID = ?";
+        try (Connection cn = DataSourceProvider.get().getConnection();
+             PreparedStatement ps = cn.prepareStatement(sql)) {
+            ps.setLong(1, flashSaleItemId);
             return ps.executeUpdate();
         }
     }

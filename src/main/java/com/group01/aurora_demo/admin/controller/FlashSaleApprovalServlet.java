@@ -79,13 +79,20 @@ public class FlashSaleApprovalServlet extends HttpServlet {
             resp.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing flash sale item id");
             return;
         }
-
-        int result = dao.updateApprovalStatus(flashSaleItemId, "APPROVED");
         
-        if (result > 0) {
-            req.getSession().setAttribute("successMessage", "Đã duyệt sản phẩm thành công!");
+        // Verify this item is not a duplicate product
+        boolean isAlreadyApproved = dao.checkIfProductAlreadyApproved(flashSaleItemId);
+        
+        if (isAlreadyApproved) {
+            req.getSession().setAttribute("errorMessage", "Sản phẩm này đã được duyệt trong đợt Flash Sale khác.");
         } else {
-            req.getSession().setAttribute("errorMessage", "Không thể duyệt sản phẩm. Vui lòng thử lại.");
+            int result = dao.updateApprovalStatus(flashSaleItemId, "APPROVED");
+            
+            if (result > 0) {
+                req.getSession().setAttribute("successMessage", "Đã duyệt sản phẩm thành công!");
+            } else {
+                req.getSession().setAttribute("errorMessage", "Không thể duyệt sản phẩm. Vui lòng thử lại.");
+            }
         }
         
         // Redirect back to approval page with current filter

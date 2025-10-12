@@ -11,7 +11,7 @@ public class DBConnectionUtil {
     static {
         try {
             HikariConfig config = new HikariConfig();
-            config.setJdbcUrl("jdbc:sqlserver://localhost:1433;databaseName=AuroraDemo;encrypt=true;trustServerCertificate=true");
+            config.setJdbcUrl("jdbc:sqlserver://localhost:1433;databaseName=AuroraDemo2;encrypt=true;trustServerCertificate=true");
             config.setUsername("sa");
             config.setPassword("123456");
             config.setMaximumPoolSize(10);
