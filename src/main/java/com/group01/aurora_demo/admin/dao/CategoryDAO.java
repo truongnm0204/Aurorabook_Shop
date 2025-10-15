@@ -1,45 +1,36 @@
-package com.group01.aurora_demo.catalog.dao;
+package com.group01.aurora_demo.admin.dao;
 
-import java.util.List;
-import java.sql.ResultSet;
-import java.sql.Connection;
-import java.util.ArrayList;
-import java.sql.SQLException;
-import java.sql.PreparedStatement;
-import com.group01.aurora_demo.catalog.model.Category;
+import com.group01.aurora_demo.admin.model.Category;
 import com.group01.aurora_demo.common.config.DataSourceProvider;
 
-public class CategoryDAO {
-    public List<Category> getCategoriesByProductId(long productId) throws SQLException {
-        List<Category> categories = new ArrayList<>();
-        String sql = """
-                SELECT c.CategoryID, c.Name
-                FROM ProductCategory pc
-                JOIN Category c ON pc.CategoryID = c.CategoryID
-                WHERE pc.ProductID = ?
-                """;
+import javax.sql.DataSource;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
-        try (Connection cn = DataSourceProvider.get().getConnection();
-                PreparedStatement ps = cn.prepareStatement(sql)) {
-            ps.setLong(1, productId);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    Category category = new Category();
-                    category.setCategoryId(rs.getLong("CategoryID"));
-                    category.setName(rs.getString("Name"));
-                    categories.add(category);
-                }
-            }
-        }
-        return categories;
+/**
+ * DAO for Category operations in admin module
+ *
+ * @author Aurora Team
+ */
+public class CategoryDAO {
+    private final DataSource dataSource;
+
+    public CategoryDAO() {
+        this.dataSource = DataSourceProvider.get();
     }
 
+    /**
+     * Get all categories
+     */
     public List<Category> getAllCategories() {
         List<Category> list = new ArrayList<>();
         String sql = "SELECT CategoryID, Name, VATCode FROM Category ORDER BY Name ASC";
-        try (Connection cn = DataSourceProvider.get().getConnection();
-                PreparedStatement ps = cn.prepareStatement(sql);
-                ResultSet rs = ps.executeQuery()) {
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
             while (rs.next()) {
                 Category c = new Category();
                 c.setCategoryId(rs.getLong("CategoryID"));
@@ -47,10 +38,39 @@ public class CategoryDAO {
                 c.setVatCode(rs.getString("VATCode"));
                 list.add(c);
             }
-        } catch (Exception e) {
+        } catch (SQLException e) {
             e.printStackTrace();
         }
         return list;
+    }
+
+    /**
+     * Get categories by product ID
+     */
+    public List<Category> getCategoriesByProductId(long productId) {
+        List<Category> categories = new ArrayList<>();
+        String sql = "SELECT c.CategoryID, c.Name, c.VATCode " +
+                     "FROM ProductCategory pc " +
+                     "JOIN Category c ON pc.CategoryID = c.CategoryID " +
+                     "WHERE pc.ProductID = ?";
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setLong(1, productId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Category category = new Category();
+                    category.setCategoryId(rs.getLong("CategoryID"));
+                    category.setName(rs.getString("Name"));
+                    category.setVatCode(rs.getString("VATCode"));
+                    categories.add(category);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return categories;
     }
 
     /**
@@ -60,7 +80,7 @@ public class CategoryDAO {
         String sql = "SELECT CategoryID, Name, VATCode FROM Category WHERE CategoryID = ?";
         Category category = null;
 
-        try (Connection conn = DataSourceProvider.get().getConnection();
+        try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setLong(1, categoryId);
@@ -84,7 +104,7 @@ public class CategoryDAO {
     public boolean addCategory(Category category) {
         String sql = "INSERT INTO Category (Name, VATCode) VALUES (?, ?)";
 
-        try (Connection conn = DataSourceProvider.get().getConnection();
+        try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, category.getName());
@@ -103,7 +123,7 @@ public class CategoryDAO {
     public boolean updateCategory(Category category) {
         String sql = "UPDATE Category SET Name = ?, VATCode = ? WHERE CategoryID = ?";
 
-        try (Connection conn = DataSourceProvider.get().getConnection();
+        try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, category.getName());
@@ -123,7 +143,7 @@ public class CategoryDAO {
     public boolean deleteCategory(long categoryId) {
         String sql = "DELETE FROM Category WHERE CategoryID = ?";
 
-        try (Connection conn = DataSourceProvider.get().getConnection();
+        try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setLong(1, categoryId);
@@ -140,7 +160,7 @@ public class CategoryDAO {
     public boolean isCategoryInUse(long categoryId) {
         String sql = "SELECT COUNT(*) FROM ProductCategory WHERE CategoryID = ?";
 
-        try (Connection conn = DataSourceProvider.get().getConnection();
+        try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setLong(1, categoryId);
@@ -161,7 +181,7 @@ public class CategoryDAO {
     public boolean categoryNameExists(String name) {
         String sql = "SELECT COUNT(*) FROM Category WHERE Name = ?";
 
-        try (Connection conn = DataSourceProvider.get().getConnection();
+        try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, name);
@@ -182,7 +202,7 @@ public class CategoryDAO {
     public boolean categoryNameExistsExcludingId(String name, long excludeCategoryId) {
         String sql = "SELECT COUNT(*) FROM Category WHERE Name = ? AND CategoryID != ?";
 
-        try (Connection conn = DataSourceProvider.get().getConnection();
+        try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, name);
@@ -220,7 +240,7 @@ public class CategoryDAO {
 
         sql.append(" ORDER BY Name ASC OFFSET ? ROWS FETCH NEXT ? ROWS ONLY");
 
-        try (Connection conn = DataSourceProvider.get().getConnection();
+        try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql.toString())) {
 
             int paramIndex = 1;
@@ -270,7 +290,7 @@ public class CategoryDAO {
             sql.append(" AND VATCode = ?");
         }
 
-        try (Connection conn = DataSourceProvider.get().getConnection();
+        try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql.toString())) {
 
             int paramIndex = 1;
@@ -295,5 +315,4 @@ public class CategoryDAO {
         }
         return 0;
     }
-
 }

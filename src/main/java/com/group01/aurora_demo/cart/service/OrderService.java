@@ -24,6 +24,7 @@ import com.group01.aurora_demo.common.config.DataSourceProvider;
 import com.group01.aurora_demo.profile.model.Address;
 import com.group01.aurora_demo.shop.dao.VoucherDAO;
 import com.group01.aurora_demo.shop.model.Voucher;
+import com.group01.aurora_demo.admin.dao.VATDAO;
 
 public class OrderService {
     private OrderDAO orderDAO;
@@ -34,6 +35,7 @@ public class OrderService {
     private CheckoutService checkoutService;
     private CartItemDAO cartItemDAO;
     private VoucherValidator voucherValidator;
+    private VATDAO vatDAO;
 
     public OrderService() {
         this.orderDAO = new OrderDAO();
@@ -44,6 +46,7 @@ public class OrderService {
         this.cartItemDAO = new CartItemDAO();
         this.voucherDAO = new VoucherDAO();
         this.voucherValidator = new VoucherValidator();
+        this.vatDAO = new VATDAO();
     }
 
     public boolean createOrder(User user, Address address, Voucher voucherDiscount,
@@ -120,7 +123,10 @@ public class OrderService {
                     orderItem.setQuantity(item.getQuantity());
                     orderItem.setUnitPrice(item.getProduct().getSalePrice());
                     orderItem.setSubtotal(item.getQuantity() * item.getProduct().getSalePrice());
-                    orderItem.setVatRate(0);
+
+                    // Calculate VAT rate based on product category
+                    double vatRate = vatDAO.getVATRateByProductId(item.getProduct().getProductId());
+                    orderItem.setVatRate(vatRate);
 
                     if (!orderItemDAO.createOrderItem(conn, orderItem)) {
                         conn.rollback();
