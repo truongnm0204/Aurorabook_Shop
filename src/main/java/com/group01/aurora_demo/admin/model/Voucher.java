@@ -198,7 +198,7 @@ public class Voucher {
     }
 
     public String getFormattedValue() {
-        if ("percentage".equalsIgnoreCase(discountType)) {
+        if ("PERCENT".equalsIgnoreCase(discountType)) {
             return value + "%";
         } else {
             return String.format("%,.0f VNĐ", value);
